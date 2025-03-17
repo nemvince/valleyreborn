@@ -26,6 +26,8 @@ from dnslib import DNSRecord, QTYPE, A, AAAA, RR, DNSHeader
 from theme import stylesheet
 import os
 import json
+import subprocess
+import ctypes
 
 IPv4_REGEX = r"((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])"
 IPv6_REGEX = r"([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])"
@@ -126,11 +128,39 @@ class DNSServerUI(QMainWindow):
 
         QMessageBox.information(self, "Made by @nemvince", "This wonderful piece of software, otherwise known as Valley Reborn DNS was made by a student here, specifically for Völgyi Iván.")
 
+        self.doFirewallCheck()
+
         self.dns_server = DNSServer(self.updateStatus)
 
         self.loadConfig()
 
         self.startServer()
+
+    def doFirewallCheck(self):
+        try:
+            result = subprocess.run(
+                ["netsh", "advfirewall", "firewall", "show", "rule", "name=all"],
+                capture_output=True,
+                text=True,
+                check=True,
+                encoding="utf-8"
+            )
+
+            name_pattern = rf"Rule Name\s*:\s*{re.escape('Inbound DNS')}"
+            port_pattern = rf"LocalPort\s*:\s*53"
+            firewallMatches = bool(re.search(name_pattern, result.stdout) and re.search(port_pattern, result.stdout))
+
+            if firewallMatches:
+                self.log_list_widget.addItem("Firewall record present")
+                return True
+            else:
+                QMessageBox.information(self, "Firewall Rule Creation", "Creating new firewall rule for DNS.\nThis will need administrative privileges.")
+        
+            cmd = 'netsh advfirewall firewall add rule name="Inbound DNS" dir=in action=allow protocol=UDP localport=53'
+
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f"/c {cmd}", None, 1)
+        except subprocess.CalledProcessError:
+            QMessageBox.critical(self, "Firewall check failed", "Failed to check for existing firewall rule.")
 
     def loadConfig(self):
         """Load DNS records and server settings from the config file."""
