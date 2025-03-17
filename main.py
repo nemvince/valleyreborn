@@ -143,7 +143,8 @@ class DNSServerUI(QMainWindow):
                 capture_output=True,
                 text=True,
                 check=True,
-                encoding="utf-8"
+                encoding="utf-8",
+                errors="replace"
             )
 
             name_pattern = rf"Rule Name\s*:\s*{re.escape('Inbound DNS')}"
@@ -154,13 +155,52 @@ class DNSServerUI(QMainWindow):
                 self.log_list_widget.addItem("Firewall record present")
                 return True
             else:
-                QMessageBox.information(self, "Firewall Rule Creation", "Creating new firewall rule for DNS.\nThis will need administrative privileges.")
-        
-            cmd = 'netsh advfirewall firewall add rule name="Inbound DNS" dir=in action=allow protocol=UDP localport=53'
+                reply = QMessageBox.question(
+                    self,
+                    "Firewall Rule Creation",
+                    "Inbound DNS firewall rule not found. The DNS server will likely not be accessible without this. If you choose not to create the rule, you will get a Windows Firewall popup every time you open Valley Reborn DNS. Creating the rule will take administrative privileges. Would you like to create it now?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
 
-            ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f"/c {cmd}", None, 1)
+                if reply == QMessageBox.StandardButton.Yes:
+                    cmd = 'netsh advfirewall firewall add rule name="Inbound DNS" dir=in action=allow protocol=UDP localport=53'
+                    ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f"/c {cmd}", None, 1)
+                    self.log_list_widget.addItem("Firewall rule created for Inbound DNS.")
+                else:
+                    self.log_list_widget.addItem("User opted not to create firewall rule.")
+
         except subprocess.CalledProcessError:
             QMessageBox.critical(self, "Firewall check failed", "Failed to check for existing firewall rule.")
+        except Exception as e:
+            QMessageBox.critical(self, "Firewall check failed", f"Unexpected error while doing check for firewall rule!\n{e}")
+            try:
+                result = subprocess.run(
+                    ["netsh", "advfirewall", "firewall", "show", "rule", "name=all"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    encoding="utf-8",
+                    errors="replace"
+                )
+
+                name_pattern = rf"Rule Name\s*:\s*{re.escape('Inbound DNS')}"
+                port_pattern = rf"LocalPort\s*:\s*53"
+                firewallMatches = bool(re.search(name_pattern, result.stdout) and re.search(port_pattern, result.stdout))
+
+                if firewallMatches:
+                    self.log_list_widget.addItem("Firewall record present")
+                    return True
+                else:
+                    QMessageBox.information(self, "Firewall Rule Creation", "Creating new firewall rule for DNS.\nThis will need administrative privileges.")
+
+                cmd = 'netsh advfirewall firewall add rule name="Inbound DNS" dir=in action=allow protocol=UDP localport=53'
+
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", f"/c {cmd}", None, 1)
+            except subprocess.CalledProcessError:
+                QMessageBox.critical(self, "Firewall check failed", "Failed to check for existing firewall rule.")
+            except Exception as e:
+                QMessageBox.critical(self, "Firewall check failed", f"Unexpected error while doing check for firewall rule!\n{e}")
 
     def loadConfig(self):
         """Load DNS records and server settings from the config file."""
